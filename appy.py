@@ -14,6 +14,7 @@ config_banco = {
     'database': 'jeff1591_Gaptech'
 }
 
+
 def obtener_conexao():
     try:
         conn = mysql.connector.connect(**config_banco)
@@ -71,6 +72,29 @@ def atualizar_horas_banco(id_pedido, novas_horas, data_pedido, hora_inicio_origi
         cursor.close()
         conn.close()
 
+# NOVA FUNÇÃO: Atualiza os campos exclusivos de hora_maquina e valor_maquina
+def atualizar_horas_maquina_banco(id_pedido, nova_hora_maquina, tabela_valor_maquina):
+    conn = obtener_conexao()
+    if conn:
+        cursor = conn.cursor()
+        
+        # Define o valor por hora com base no tipo de máquina escolhida
+        valor_hora = 120.0 if "120" in tabela_valor_maquina or "Fio" in tabela_valor_maquina else 90.0
+        # Calcula o sub-faturamento da máquina
+        sub_total_maquina = float(nova_hora_maquina) * valor_hora
+        
+        query = """
+            UPDATE pedidos 
+            SET hora_maquina = %s, valor_maquina = %s 
+            WHERE id = %s
+        """
+        cursor.execute(query, (nova_hora_maquina, sub_total_maquina, id_pedido))
+        conn.commit()
+        st.toast(f"⚙️ Campos de máquina salvos! Sub-total: R$ {sub_total_maquina:.2f}", icon="⚙️")
+        
+        cursor.close()
+        conn.close()
+
 # Inicialização das variáveis de controle de navegação e preenchimento
 if 'aba_selecionada' not in st.session_state:
     st.session_state['aba_selecionada'] = "📅 Agenda Diária"
@@ -108,7 +132,6 @@ st.markdown("---")
 if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
     st.header("📅 Agenda de Ocupação Operacional")
     
-    # ADICIONADO: format="DD/MM/YYYY" para converter a exibição para PT-BR
     data_agenda = st.date_input("Filtrar Dia da Agenda", value=st.session_state['agenda_data_selecionada'], format="DD/MM/YYYY")
     st.session_state['agenda_data_selecionada'] = data_agenda
 
@@ -118,7 +141,6 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
         df_dia = pd.read_sql(query, con=conn, params=[data_agenda.strftime('%Y-%m-%d')])
         conn.close()
         
-        # Criação dos blocos de 30 em 30 minutos (07:00 até 19:00)
         horarios_agenda = []
         hora_atual_dt = datetime.combine(data_agenda, time(7, 0))
         hora_fim_dt = datetime.combine(data_agenda, time(19, 0))
@@ -142,7 +164,6 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                         p_inicio = datetime.strptime(h_inicio_str.strip(), "%H:%M").time()
                         p_fim = datetime.strptime(h_fim_str.strip(), "%H:%M").time()
                         
-                        # Verifica se o bloco de 30 minutos atual pertence a esse agendamento
                         if p_inicio <= h < p_fim:
                             ocupado = True
                             dados_pedido = pedido
@@ -155,19 +176,47 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
             # --- CARD OCUPADO ---
             if ocupado:
                 with st.container(border=True):
-                    col_info, col_acao = st.columns([5, 1])
+                    col_info, col_acao = st.columns([4, 2])
                     with col_info:
                         st.markdown(f"🔴 **{h.strftime('%H:%M')}**   |   **Duração:** {dados_pedido['horas']}h")
                         st.markdown(f"👤 **{str(dados_pedido['cliente']).upper()}**")
-                        st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}*")
+                        
+                        # Verifica se já existem valores salvos nos novos campos para mostrar no card
+                        h_maq_salva = dados_pedido.get('hora_maquina', 0.0) or 0.0
+                        v_maq_salvo = dados_pedido.get('valor_maquina', 0.0) or 0.0
+                        texto_adicional = f" | ⏱️ Máq: {h_maq_salva}h (R$ {v_maq_salvo:.2f})" if h_maq_salva > 0 else ""
+                        
+                        st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}{texto_adicional}*")
                     
                     with col_acao:
-                        with st.popover("⚙️ Editar"):
-                            st.write("**Ajustar Tempo de Máquina**")
-                            novas_horas = st.number_input("Horas:", min_value=0.1, max_value=24.0, value=float(dados_pedido['horas']), step=0.5, key=f"edit_{dados_pedido['id']}_{h}")
-                            if st.button("Salvar no Banco", key=f"btn_{dados_pedido['id']}_{h}"):
-                                atualizar_horas_banco(dados_pedido['id'], novas_horas, data_agenda, p_inicio_original)
-                                st.rerun()
+                        # Colunas alinhadas lado a lado para "Editar" e "Horas"
+                        btn_col1, btn_col2 = st.columns(2)
+                        
+                        with btn_col1:
+                            with st.popover("⚙️ Editar"):
+                                st.write("**Ajustar Tempo de Máquina**")
+                                novas_horas = st.number_input("Horas:", min_value=0.1, max_value=24.0, value=float(dados_pedido['horas']), step=0.5, key=f"edit_{dados_pedido['id']}_{h}")
+                                if st.button("Salvar no Banco", key=f"btn_{dados_pedido['id']}_{h}"):
+                                    atualizar_horas_banco(dados_pedido['id'], novas_horas, data_agenda, p_inicio_original)
+                                    st.rerun()
+                                    
+                        with btn_col2:
+                            with st.popover("⏱️ Horas"):
+                                st.write("**Campos Adicionais da Máquina**")
+                                
+                                # Inputs exclusivos para os novos campos
+                                val_hora_maq_atual = float(dados_pedido.get('hora_maquina', 0.0) or 0.0)
+                                hora_maquina_input = st.number_input("Hora Máquina:", min_value=0.0, max_value=24.0, value=val_hora_maq_atual, step=0.5, key=f"hm_{dados_pedido['id']}_{h}")
+                                
+                                maquina_valor_opcao = st.selectbox(
+                                    "Tabela de Valor/h",
+                                    ["Erosão a Fio (R$ 120/h)", "Erosão a Penetração (R$ 90/h)", "Erosão a Penetração (R$ 120/h)"],
+                                    key=f"vm_sel_{dados_pedido['id']}_{h}"
+                                )
+                                
+                                if st.button("Salvar Horas", key=f"btn_hm_{dados_pedido['id']}_{h}"):
+                                    atualizar_horas_maquina_banco(dados_pedido['id'], hora_maquina_input, maquina_valor_opcao)
+                                    st.rerun()
                                 
             # --- CARD DISPONÍVEL ---
             else:
@@ -195,7 +244,6 @@ elif st.session_state['aba_selecionada'] == "📝 Inserir Pedido":
     
     with st.form("form_pedido", clear_on_submit=True):
         cliente = st.text_input("Nome do Cliente")
-        # ADICIONADO: format="DD/MM/YYYY" para converter a exibição para PT-BR também na inserção
         data_pedido = st.date_input("Data do Trabalho", value=st.session_state['planner_data'], format="DD/MM/YYYY")
         
         col_horario1, col_horario2 = st.columns(2)
@@ -234,8 +282,8 @@ elif st.session_state['aba_selecionada'] == "📝 Inserir Pedido":
                 if conn:
                     cursor = conn.cursor()
                     comando_sql = """
-                    INSERT INTO pedidos (cliente, data_pedido, horario, horas, maquina, valor_hora, faturamento_total)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO pedidos (cliente, data_pedido, horario, horas, maquina, valor_hora, faturamento_total, hora_maquina, valor_maquina)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0.0, 0.0)
                     """
                     valores = (cliente, data_pedido.strftime('%Y-%m-%d'), horario_string, horas, maquina, valor_hora, faturamento_total)
                     cursor.execute(comando_sql, valores)
@@ -315,7 +363,6 @@ elif st.session_state['aba_selecionada'] == "📊 Relatório de Análise":
             st.subheader("⚙️ Tempo de Ocupação das Máquinas")
             horas_por_maquina = df.groupby('maquina')['horas'].sum()
             
-            # Calcula a capacidade com base na regra de 12h (seg-sex) e 6h (sáb)
             CAPACIDADE_REAL_PERIODO = calcular_capacidade_real(df)
             
             col_maq = st.columns(len(horas_por_maquina))
