@@ -14,8 +14,7 @@ config_banco = {
     'database': 'jeff1591_Gaptech'
 }
 
-
-def obter_conexao():
+def obtener_conexao():
     try:
         conn = mysql.connector.connect(**config_banco)
         return conn
@@ -32,7 +31,7 @@ aba_insercao, aba_analise = st.tabs(["📝 Inserir Pedido", "📊 Relatório de 
 with aba_insercao:
     st.header("Inserir Novo Pedido")
     
-    # Criando o formulário visual
+    # O clear_on_submit=True faz o formulário resetar os campos ao clicar em salvar
     with st.form("form_pedido", clear_on_submit=True):
         cliente = st.text_input("Nome do Cliente")
         data_pedido = st.date_input("Data do Trabalho", value=datetime.today())
@@ -78,7 +77,7 @@ with aba_insercao:
                 horario_string = f"{hora_inicio.strftime('%H:%M')} as {hora_fim.strftime('%H:%M')}"
                 
                 # Inserindo no banco
-                conn = obter_conexao()
+                conn = obtener_conexao()
                 if conn:
                     cursor = conn.cursor()
                     comando_sql = """
@@ -92,7 +91,15 @@ with aba_insercao:
                     cursor.close()
                     conn.close()
                     
-                    st.success(f"✅ Pedido do cliente '{cliente}' salvo com sucesso!")
+                    # Guarda na sessão temporária que salvou com sucesso para exibir a mensagem após o reset
+                    st.session_state['sucesso_insercao'] = f"✅ Pedido do cliente '{cliente}' salvo com sucesso!"
+                    # Força o recarregamento da página (limpa os campos visualmente e atualiza os gráficos)
+                    st.rerun()
+
+    # Mostra a mensagem de sucesso após o rerun se ela existir
+    if 'sucesso_insercao' in st.session_state:
+        st.success(st.session_state['sucesso_insercao'])
+        del st.session_state['sucesso_insercao']
 
 # =====================================================================
 # ABA 2: ANÁLISE DOS DADOS (RELATÓRIO)
@@ -100,11 +107,10 @@ with aba_insercao:
 with aba_analise:
     st.header("Análise de Faturamento e Ocupação")
     
-    # Botão para atualizar os dados manualmente se necessário
     if st.button("Atualizar Relatório 🔄"):
         st.rerun()
         
-    conn = obter_conexao()
+    conn = obtener_conexao()
     if conn:
         query = "SELECT * FROM pedidos"
         df = pd.read_sql(query, con=conn)
@@ -113,8 +119,9 @@ with aba_analise:
         if df.empty:
             st.info("Nenhum dado encontrado no banco de dados.")
         else:
-            # Tratamento da data
+            # Correção do erro: garantimos que o índice do DataFrame seja a data antes de agrupar por tempo
             df['data_pedido'] = pd.to_datetime(df['data_pedido'])
+            df_temporal = df.set_index('data_pedido')
             
             # --- Bloco de Faturamento ---
             st.subheader("💰 Faturamento")
@@ -122,8 +129,8 @@ with aba_analise:
             
             with col1:
                 st.markdown("**Faturamento Semanal**")
-                faturamento_semanal = df.resample('W', on='data_pedido')['faturamento_total'].sum()
-                # Mostra como tabela formatada
+                # Mudança de 'W' para 'W-SUN' (Semanas terminando no Domingo) para evitar incompatibilidade
+                faturamento_semanal = df_temporal['faturamento_total'].resample('W-SUN').sum()
                 df_semanal = faturamento_semanal.reset_index()
                 df_semanal.columns = ['Fim da Semana', 'Faturamento (R$)']
                 df_semanal['Fim da Semana'] = df_semanal['Fim da Semana'].dt.strftime('%d/%m/%Y')
@@ -131,7 +138,8 @@ with aba_analise:
                 
             with col2:
                 st.markdown("**Faturamento Mensal**")
-                faturamento_mensal = df.resample('M', on='data_pedido')['faturamento_total'].sum()
+                # Mudança de 'M' para 'ME' (Month End - padrão moderno do Pandas)
+                faturamento_mensal = df_temporal['faturamento_total'].resample('ME').sum()
                 df_mensal = faturamento_mensal.reset_index()
                 df_mensal.columns = ['Mês/Ano', 'Faturamento (R$)']
                 df_mensal['Mês/Ano'] = df_mensal['Mês/Ano'].dt.strftime('%m/%Y')
@@ -160,7 +168,6 @@ with aba_analise:
             st.subheader("⚙️ Tempo de Ocupação das Máquinas")
             horas_por_maquina = df.groupby('maquina')['horas'].sum()
             
-            # Capacidade mensal estimada (ex: 160h)
             CAPACIDADE_MENSAL = 160.0
             
             col_maq = st.columns(len(horas_por_maquina))
