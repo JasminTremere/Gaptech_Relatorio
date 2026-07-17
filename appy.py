@@ -115,6 +115,7 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
             ocupado = False
             dados_pedido = None
             p_inicio_original = None
+            p_fim_original_str = ""
             
             if not df_dia.empty:
                 for _, pedido in df_dia.iterrows():
@@ -128,6 +129,7 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                             ocupado = True
                             dados_pedido = pedido
                             p_inicio_original = p_inicio
+                            p_fim_original_str = h_fim_str.strip() # Guarda o texto do término para exibir no card
                             break
                     except:
                         continue
@@ -139,14 +141,14 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                     with col_info:
                         # Rótulo superior do Card com Horário do bloco e Duração Total da OS
                         st.markdown(f"🔴 **{h.strftime('%H:%M')}**   |   **Duração:** {dados_pedido['horas']}h")
-                        # Informações organizadas verticalmente: Nome do Cliente e Máquina embaixo
+                        # Informações organizadas verticalmente: Nome do Cliente
                         st.markdown(f"👤 **{str(dados_pedido['cliente']).upper()}**")
-                        st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f})*")
+                        # Nome da máquina, valor total e horário de término da OS adicionado ao final
+                        st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}*")
                     
                     with col_acao:
                         with st.popover("⚙️ Editar"):
                             st.write("**Ajustar Tempo de Máquina**")
-                            # Campo aceita valores fracionados (Ex: 1.5 para 1h30min, 2.0 para 2h)
                             novas_horas = st.number_input("Horas:", min_value=0.1, max_value=24.0, value=float(dados_pedido['horas']), step=0.5, key=f"edit_{dados_pedido['id']}_{h}")
                             if st.button("Salvar no Banco", key=f"btn_{dados_pedido['id']}_{h}"):
                                 atualizar_horas_banco(dados_pedido['id'], novas_horas, data_agenda, p_inicio_original)
