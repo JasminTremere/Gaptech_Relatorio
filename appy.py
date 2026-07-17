@@ -22,6 +22,23 @@ def obtener_conexao():
         st.error(f"Erro ao conectar ao banco HostGator: {err}")
         return None
 
+# Função para calcular a capacidade real (usada no relatório de análise)
+def calcular_capacidade_real(df_pedidos):
+    if df_pedidos.empty:
+        return 160.0
+    data_minima = df_pedidos['data_pedido'].min()
+    data_maxima = df_pedidos['data_pedido'].max()
+    todos_os_dias = pd.date_range(start=data_minima, end=data_maxima)
+    
+    total_horas_capacidade = 0.0
+    for dia in todos_os_dias:
+        dia_semana = dia.weekday()
+        if dia_semana <= 4:  # Seg a Sex
+            total_horas_capacidade += 12.0
+        elif dia_semana == 5: # Sábado
+            total_horas_capacidade += 6.0
+    return max(total_horas_capacidade, 12.0)
+
 # Função para atualizar horas, faturamento e expandir/encolher o horário de término no banco de dados
 def atualizar_horas_banco(id_pedido, novas_horas, data_pedido, hora_inicio_original):
     conn = obtener_conexao()
@@ -129,7 +146,7 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                             ocupado = True
                             dados_pedido = pedido
                             p_inicio_original = p_inicio
-                            p_fim_original_str = h_fim_str.strip() # Guarda o texto do término para exibir no card
+                            p_fim_original_str = h_fim_str.strip()
                             break
                     except:
                         continue
@@ -139,11 +156,8 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                 with st.container(border=True):
                     col_info, col_acao = st.columns([5, 1])
                     with col_info:
-                        # Rótulo superior do Card com Horário do bloco e Duração Total da OS
                         st.markdown(f"🔴 **{h.strftime('%H:%M')}**   |   **Duração:** {dados_pedido['horas']}h")
-                        # Informações organizadas verticalmente: Nome do Cliente
                         st.markdown(f"👤 **{str(dados_pedido['cliente']).upper()}**")
-                        # Nome da máquina, valor total e horário de término da OS adicionado ao final
                         st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}*")
                     
                     with col_acao:
@@ -236,27 +250,79 @@ elif st.session_state['aba_selecionada'] == "📝 Inserir Pedido":
                     st.rerun()
 
 # =====================================================================
-# TELA: 📊 RELATÓRIO DE ANÁLISE
+# TELA: 📊 RELATÓRIO DE ANÁLISE (COMPLETO RESTAURADO)
 # =====================================================================
 elif st.session_state['aba_selecionada'] == "📊 Relatório de Análise":
     st.header("Análise de Faturamento e Ocupação")
+    
+    if st.button("Atualizar Relatório 🔄"):
+        st.rerun()
+        
     conn = obtener_conexao()
     if conn:
         query = "SELECT * FROM pedidos"
-        df_analise = pd.read_sql(query, con=conn)
+        df = pd.read_sql(query, con=conn)
         conn.close()
         
-        if df_analise.empty:
-            st.info("Nenhum dado cadastrado.")
+        if df.empty:
+            st.info("Nenhum dado encontrado no banco de dados.")
         else:
-            df_analise['data_pedido'] = pd.to_datetime(df_analise['data_pedido'])
-            df_temporal = df_analise.set_index('data_pedido')
+            df['data_pedido'] = pd.to_datetime(df['data_pedido'])
+            df_temporal = df.set_index('data_pedido')
             
+            # --- Bloco de Faturamento ---
             st.subheader("💰 Faturamento")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Semanal**")
-                st.dataframe(df_temporal['faturamento_total'].resample('W-SUN').sum().reset_index())
-            with c2:
-                st.markdown("**Mensal**")
-                st.dataframe(df_temporal['faturamento_total'].resample('ME').sum().reset_index())
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Faturamento Semanal**")
+                faturamento_semanal = df_temporal['faturamento_total'].resample('W-SUN').sum()
+                df_semanal = faturamento_semanal.reset_index()
+                df_semanal.columns = ['Fim da Semana', 'Faturamento (R$)']
+                df_semanal['Fim da Semana'] = df_semanal['Fim da Semana'].dt.strftime('%d/%m/%Y')
+                st.dataframe(df_semanal.style.format({'Faturamento (R$)': 'R$ {:.2f}'}))
+                
+            with col2:
+                st.markdown("**Faturamento Mensal**")
+                faturamento_mensal = df_temporal['faturamento_total'].resample('ME').sum()
+                df_mensal = faturamento_mensal.reset_index()
+                df_mensal.columns = ['Mês/Ano', 'Faturamento (R$)']
+                df_mensal['Mês/Ano'] = df_mensal['Mês/Ano'].dt.strftime('%m/%Y')
+                st.dataframe(df_mensal.style.format({'Faturamento (R$)': 'R$ {:.2f}'}))
+                
+            st.markdown("---")
+            
+            # --- Bloco de Clientes ---
+            st.subheader("👥 Análise de Clientes")
+            pedidos_por_cliente = df['cliente'].value_counts()
+            
+            col_cli1, col_cli2 = st.columns([1, 2])
+            with col_cli1:
+                st.metric("Cliente com MAIS pedidos", f"{pedidos_por_cliente.idxmax()}", f"{pedidos_por_cliente.max()} pedidos")
+                st.metric("Cliente com MENOS pedidos", f"{pedidos_por_cliente.idxmin()}", f"{pedidos_por_cliente.min()} pedidos")
+            
+            with col_cli2:
+                st.markdown("**Total de pedidos por cliente:**")
+                df_clientes = pedidos_por_cliente.reset_index()
+                df_clientes.columns = ['Cliente', 'Quantidade de Pedidos']
+                st.dataframe(df_clientes, use_container_width=True)
+                
+            st.markdown("---")
+            
+            # --- Bloco de Máquinas ---
+            st.subheader("⚙️ Tempo de Ocupação das Máquinas")
+            horas_por_maquina = df.groupby('maquina')['horas'].sum()
+            
+            # Calcula a capacidade com base na regra de 12h (seg-sex) e 6h (sáb)
+            CAPACIDADE_REAL_PERIODO = calcular_capacidade_real(df)
+            
+            col_maq = st.columns(len(horas_por_maquina))
+            for i, (maquina, horas_ocupadas) in enumerate(horas_por_maquina.items()):
+                with col_maq[i]:
+                    # Tempo livre é a capacidade real total calculada menos o que já foi trabalhado
+                    horas_livres = max(0.0, CAPACIDADE_REAL_PERIODO - horas_ocupadas)
+                    st.info(f"**{maquina}**")
+                    st.metric("Horas Ocupadas", f"{horas_ocupadas:.1f}h")
+                    st.metric("Horas Livres Totais no Período", f"{horas_livres:.1f}h")
+            
+            st.caption(f"ℹ️ O tempo livre é baseado na capacidade operacional da empresa para o intervalo de datas detectado (Seg-Sex: 12h/dia | Sáb: 6h/dia).")
