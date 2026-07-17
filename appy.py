@@ -1,7 +1,7 @@
 import streamlit as st
 import mysql.connector
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
 
 # Configuração da página do Streamlit
 st.set_page_config(page_title="Sistema de Relatórios - GapTech", layout="wide")
@@ -22,6 +22,29 @@ def obtener_conexao():
         st.error(f"Erro ao conectar ao banco HostGator: {err}")
         return None
 
+# Função para calcular a capacidade real de horas com base nos dias úteis e sábados
+def calcular_capacidade_real(df_pedidos):
+    if df_pedidos.empty:
+        return 160.0
+    
+    # Descobre o período dos dados cadastrados
+    data_minima = df_pedidos['data_pedido'].min()
+    data_maxima = df_pedidos['data_pedido'].max()
+    
+    # Gera todos os dias entre a menor e a maior data
+    todos_os_dias = pd.date_range(start=data_minima, end=data_maxima)
+    
+    total_horas_capacidade = 0.0
+    for dia in todos_os_dias:
+        dia_semana = dia.weekday() # 0 = Segunda, 4 = Sexta, 5 = Sábado, 6 = Domingo
+        
+        if dia_semana <= 4: # Segunda a Sexta
+            total_horas_capacidade += 12.0 # 07h às 19h = 12 horas
+        elif dia_semana == 5: # Sábado
+            total_horas_capacidade += 6.0 # 07h às 13h = 6 horas
+            
+    return max(total_horas_capacidade, 12.0) # Garante um mínimo para não zerar
+
 # Criando as duas abas no topo da página do Streamlit
 aba_insercao, aba_analise = st.tabs(["📝 Inserir Pedido", "📊 Relatório de Análise"])
 
@@ -31,47 +54,48 @@ aba_insercao, aba_analise = st.tabs(["📝 Inserir Pedido", "📊 Relatório de 
 with aba_insercao:
     st.header("Inserir Novo Pedido")
     
-    # O clear_on_submit=True faz o formulário resetar os campos ao clicar em salvar
     with st.form("form_pedido", clear_on_submit=True):
         cliente = st.text_input("Nome do Cliente")
         data_pedido = st.date_input("Data do Trabalho", value=datetime.today())
         
-        # Horários
+        # Horários operacionais padrões sugeridos
         col_horario1, col_horario2 = st.columns(2)
         with col_horario1:
-            hora_inicio = st.time_input("Horário de Início", value=datetime.strptime("08:00", "%H:%M").time())
+            hora_inicio = st.time_input("Horário de Início", value=time(7, 0))
         with col_horario2:
-            hora_fim = st.time_input("Horário de Término", value=datetime.strptime("12:00", "%H:%M").time())
+            hora_fim = st.time_input("Horário de Término", value=time(19, 0))
             
         horas = st.number_input("Quantas horas levou?", min_value=0.1, max_value=24.0, value=4.0, step=0.5)
         
-        # Seleção da Máquina
         maquina_opcao = st.selectbox(
             "Selecione a Máquina",
-            [
-                "Erosão a Fio (R$ 120/h)",
-                "Erosão a Penetração (R$ 90/h)",
-                "Erosão a Penetração (R$ 120/h)"
-            ]
+            ["Erosão a Fio (R$ 120/h)", "Erosão a Penetração (R$ 90/h)", "Erosão a Penetração (R$ 120/h)"]
         )
         
-        # Botão para enviar
         submetido = st.form_submit_button("Salvar Pedido no Banco de Dados")
         
         if submetido:
+            dia_da_semana = data_pedido.weekday() # 0=Segunda, 5=Sábado, 6=Domingo
+            
+            # --- VALIDAÇÕES DE HORÁRIO DA EMPRESA ---
             if not cliente:
                 st.warning("Por favor, digite o nome do cliente.")
-            else:
-                # Trata a escolha da máquina e o valor da hora
+            elif dia_da_semana == 6:
+                st.error("❌ Não é permitido cadastrar trabalhos aos Domingos. A empresa opera de segunda a sábado.")
+            elif dia_da_semana == 5 and (hora_inicio < time(7, 0) or hora_fim > time(13, 0)):
+                st.warning("⚠️ Atenção: O horário padrão de sábado é das 07h às 13h. Verifique se os dados estão corretos.")
+                # Permite salvar mesmo assim caso seja uma exceção real, removendo o "elif" se preferir bloquear totalmente
+            elif hora_inicio < time(7, 0) or hora_fim > time(19, 0):
+                st.warning("⚠️ Atenção: O horário de expediente padrão é das 07h às 19h.")
+            
+            if cliente and dia_da_semana != 6:
+                # Trata a escolha da máquina
                 if "Fio" in maquina_opcao:
-                    maquina = "Erosão a Fio"
-                    valor_hora = 120
+                    maquina, valor_hora = "Erosão a Fio", 120
                 elif "90" in maquina_opcao:
-                    maquina = "Erosão a Penetração"
-                    valor_hora = 90
+                    maquina, valor_hora = "Erosão a Penetração", 90
                 else:
-                    maquina = "Erosão a Penetração"
-                    valor_hora = 120
+                    maquina, valor_hora = "Erosão a Penetração", 120
                     
                 faturamento_total = horas * valor_hora
                 horario_string = f"{hora_inicio.strftime('%H:%M')} as {hora_fim.strftime('%H:%M')}"
@@ -91,12 +115,9 @@ with aba_insercao:
                     cursor.close()
                     conn.close()
                     
-                    # Guarda na sessão temporária que salvou com sucesso para exibir a mensagem após o reset
                     st.session_state['sucesso_insercao'] = f"✅ Pedido do cliente '{cliente}' salvo com sucesso!"
-                    # Força o recarregamento da página (limpa os campos visualmente e atualiza os gráficos)
                     st.rerun()
 
-    # Mostra a mensagem de sucesso após o rerun se ela existir
     if 'sucesso_insercao' in st.session_state:
         st.success(st.session_state['sucesso_insercao'])
         del st.session_state['sucesso_insercao']
@@ -119,7 +140,6 @@ with aba_analise:
         if df.empty:
             st.info("Nenhum dado encontrado no banco de dados.")
         else:
-            # Correção do erro: garantimos que o índice do DataFrame seja a data antes de agrupar por tempo
             df['data_pedido'] = pd.to_datetime(df['data_pedido'])
             df_temporal = df.set_index('data_pedido')
             
@@ -129,7 +149,6 @@ with aba_analise:
             
             with col1:
                 st.markdown("**Faturamento Semanal**")
-                # Mudança de 'W' para 'W-SUN' (Semanas terminando no Domingo) para evitar incompatibilidade
                 faturamento_semanal = df_temporal['faturamento_total'].resample('W-SUN').sum()
                 df_semanal = faturamento_semanal.reset_index()
                 df_semanal.columns = ['Fim da Semana', 'Faturamento (R$)']
@@ -138,7 +157,6 @@ with aba_analise:
                 
             with col2:
                 st.markdown("**Faturamento Mensal**")
-                # Mudança de 'M' para 'ME' (Month End - padrão moderno do Pandas)
                 faturamento_mensal = df_temporal['faturamento_total'].resample('ME').sum()
                 df_mensal = faturamento_mensal.reset_index()
                 df_mensal.columns = ['Mês/Ano', 'Faturamento (R$)']
@@ -164,16 +182,20 @@ with aba_analise:
                 
             st.markdown("---")
             
-            # --- Bloco de Máquinas ---
+            # --- Bloco de Máquinas (Dinamizado pelas novas regras) ---
             st.subheader("⚙️ Tempo de Ocupação das Máquinas")
             horas_por_maquina = df.groupby('maquina')['horas'].sum()
             
-            CAPACIDADE_MENSAL = 160.0
+            # Calcula a capacidade com base na regra de 12h (seg-sex) e 6h (sáb)
+            CAPACIDADE_REAL_PERIODO = calcular_capacidade_real(df)
             
             col_maq = st.columns(len(horas_por_maquina))
             for i, (maquina, horas_ocupadas) in enumerate(horas_por_maquina.items()):
                 with col_maq[i]:
-                    horas_livres = max(0.0, CAPACIDADE_MENSAL - horas_ocupadas)
+                    # Tempo livre é a capacidade real total calculada menos o que já foi trabalhado
+                    horas_livres = max(0.0, CAPACIDADE_REAL_PERIODO - horas_ocupadas)
                     st.info(f"**{maquina}**")
                     st.metric("Horas Ocupadas", f"{horas_ocupadas:.1f}h")
-                    st.metric("Horas Livres Estimadas (Mês)", f"{horas_livres:.1f}h")
+                    st.metric("Horas Livres Totais no Período", f"{horas_livres:.1f}h")
+            
+            st.caption(f"ℹ️ O tempo livre é baseado na capacidade operacional da empresa para o intervalo de datas detectado (Seg-Sex: 12h/dia | Sáb: 6h/dia).")
