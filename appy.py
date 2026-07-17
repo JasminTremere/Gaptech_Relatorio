@@ -14,6 +14,7 @@ config_banco = {
     'database': 'jeff1591_Gaptech'
 }
 
+
 def obtener_conexao():
     try:
         conn = mysql.connector.connect(**config_banco)
@@ -71,7 +72,7 @@ def atualizar_horas_banco(id_pedido, novas_horas, data_pedido, hora_inicio_origi
         cursor.close()
         conn.close()
 
-# Função: Atualiza os campos exclusivos de hora_maquina e valor_maquina
+# NOVA FUNÇÃO: Atualiza os campos exclusivos de hora_maquina e valor_maquina
 def atualizar_horas_maquina_banco(id_pedido, nova_hora_maquina, tabela_valor_maquina):
     conn = obtener_conexao()
     if conn:
@@ -175,11 +176,12 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
             # --- CARD OCUPADO ---
             if ocupado:
                 with st.container(border=True):
-                    col_info, col_acao = st.columns([5, 1])
+                    col_info, col_acao = st.columns([4, 2])
                     with col_info:
                         st.markdown(f"🔴 **{h.strftime('%H:%M')}**   |   **Duração:** {dados_pedido['horas']}h")
                         st.markdown(f"👤 **{str(dados_pedido['cliente']).upper()}**")
                         
+                        # Verifica se já existem valores salvos nos novos campos para mostrar no card
                         h_maq_salva = dados_pedido.get('hora_maquina', 0.0) or 0.0
                         v_maq_salvo = dados_pedido.get('valor_maquina', 0.0) or 0.0
                         texto_adicional = f" | ⏱️ Máq: {h_maq_salva}h (R$ {v_maq_salvo:.2f})" if h_maq_salva > 0 else ""
@@ -187,29 +189,34 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                         st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}{texto_adicional}*")
                     
                     with col_acao:
-                        # RESOLVIDO ERRO REMOVECHILD: Apenas um Popover unificado contendo os dois formulários organizados de forma segura
-                        with st.popover("⚙️ Editar"):
-                            st.subheader("📝 Ajustar Agendamento")
-                            novas_horas = st.number_input("Horas Totais:", min_value=0.1, max_value=24.0, value=float(dados_pedido['horas']), step=0.5, key=f"edit_{dados_pedido['id']}_{h}")
-                            if st.button("Salvar Agendamento", key=f"btn_{dados_pedido['id']}_{h}"):
-                                atualizar_horas_banco(dados_pedido['id'], novas_horas, data_agenda, p_inicio_original)
-                                st.rerun()
+                        # Colunas alinhadas lado a lado para "Editar" e "Horas"
+                        btn_col1, btn_col2 = st.columns(2)
+                        
+                        with btn_col1:
+                            with st.popover("⚙️ Editar"):
+                                st.write("**Ajustar Tempo de Máquina**")
+                                novas_horas = st.number_input("Horas:", min_value=0.1, max_value=24.0, value=float(dados_pedido['horas']), step=0.5, key=f"edit_{dados_pedido['id']}_{h}")
+                                if st.button("Salvar no Banco", key=f"btn_{dados_pedido['id']}_{h}"):
+                                    atualizar_horas_banco(dados_pedido['id'], novas_horas, data_agenda, p_inicio_original)
+                                    st.rerun()
+                                    
+                        with btn_col2:
+                            with st.popover("⏱️ Horas"):
+                                st.write("**Campos Adicionais da Máquina**")
                                 
-                            st.markdown("---")
-                            
-                            st.subheader("⏱️ Campos de Máquina Extra")
-                            val_hora_maq_atual = float(dados_pedido.get('hora_maquina', 0.0) or 0.0)
-                            hora_maquina_input = st.number_input("Hora Máquina:", min_value=0.0, max_value=24.0, value=val_hora_maq_atual, step=0.5, key=f"hm_{dados_pedido['id']}_{h}")
-                            
-                            maquina_valor_opcao = st.selectbox(
-                                "Tabela de Valor/h",
-                                ["Erosão a Fio (R$ 120/h)", "Erosão a Penetração (R$ 90/h)", "Erosão a Penetração (R$ 120/h)"],
-                                key=f"vm_sel_{dados_pedido['id']}_{h}"
-                            )
-                            
-                            if st.button("Salvar Horas Máquina", key=f"btn_hm_{dados_pedido['id']}_{h}"):
-                                atualizar_horas_maquina_banco(dados_pedido['id'], hora_maquina_input, maquina_valor_opcao)
-                                st.rerun()
+                                # Inputs exclusivos para os novos campos
+                                val_hora_maq_atual = float(dados_pedido.get('hora_maquina', 0.0) or 0.0)
+                                hora_maquina_input = st.number_input("Hora Máquina:", min_value=0.0, max_value=24.0, value=val_hora_maq_atual, step=0.5, key=f"hm_{dados_pedido['id']}_{h}")
+                                
+                                maquina_valor_opcao = st.selectbox(
+                                    "Tabela de Valor/h",
+                                    ["Erosão a Fio (R$ 120/h)", "Erosão a Penetração (R$ 90/h)", "Erosão a Penetração (R$ 120/h)"],
+                                    key=f"vm_sel_{dados_pedido['id']}_{h}"
+                                )
+                                
+                                if st.button("Salvar Horas", key=f"btn_hm_{dados_pedido['id']}_{h}"):
+                                    atualizar_horas_maquina_banco(dados_pedido['id'], hora_maquina_input, maquina_valor_opcao)
+                                    st.rerun()
                                 
             # --- CARD DISPONÍVEL ---
             else:
