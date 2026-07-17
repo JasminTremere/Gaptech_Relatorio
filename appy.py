@@ -186,8 +186,8 @@ if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
                         v_maq_salvo = dados_pedido.get('valor_maquina', 0.0) or 0.0
                         texto_adicional = f" | ⏱️ Máq: {h_maq_salva}h (R$ {v_maq_salvo:.2f})" if h_maq_salva > 0 else ""
                         
-                        st.markdown(f"⚙️ *{dados_pedido['maquina']} — (Total: R$ {dados_pedido['faturamento_total']:.2f}) — Término às {p_fim_original_str}{texto_adicional}*")
-                    
+                        st.markdown(f"⚙️ *{dados_pedido['maquina']}")
+               
                     with col_acao:
                         # Colunas alinhadas lado a lado para "Editar" e "Horas"
                         btn_col1, btn_col2 = st.columns(2)
