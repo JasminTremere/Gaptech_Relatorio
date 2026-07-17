@@ -1,8 +1,12 @@
+import streamlit as st
 import mysql.connector
 import pandas as pd
+from datetime import datetime
 
-# 1. CONFIGURAÇÃO DA CONEXÃO
-# Pegue essas informações no painel da HostGator / phpMyAdmin
+# Configuração da página do Streamlit
+st.set_page_config(page_title="Sistema de Relatórios - GapTech", layout="wide")
+
+# 1. CONFIGURAÇÃO DA CONEXÃO COM A HOSTGATOR
 config_banco = {
     'host': '162.241.3.46', # Ou o IP do seu servidor informado na HostGator
     'user': 'jeff1591_db_user',
@@ -10,113 +14,159 @@ config_banco = {
     'database': 'jeff1591_Gaptech'
 }
 
+
 def obter_conexao():
     try:
         conn = mysql.connector.connect(**config_banco)
         return conn
     except mysql.connector.Error as err:
-        print(f"Erro ao conectar ao banco HostGator: {err}")
+        st.error(f"Erro ao conectar ao banco HostGator: {err}")
         return None
 
-# -------------------------------------------------------------
-# PARTE 1: INSERÇÃO DE DADOS NO BANCO
-# -------------------------------------------------------------
-def salvar_pedido_no_banco():
-    print("\n--- INSERÇÃO DE NOVO PEDIDO ---")
-    cliente = input("Nome do Cliente: ")
-    data_str = input("Data (AAAA-MM-DD): ")
-    horario = input("Horário (Ex: 08:00 as 12:00): ")
-    horas = float(input("Quantas horas levou? "))
-    
-    print("Selecione a Máquina:\n1 - Erosão a Fio (R$ 120/h)\n2 - Erosão a Penetração (R$ 90/h)\n3 - Erosão a Penetração (R$ 120/h)")
-    opcao = input("Opção: ")
-    
-    # Define máquina e valores baseados na sua regra anterior
-    maquina, valor_hora = "Erosão a Fio", 120
-    if opcao == '2': maquina, valor_hora = "Erosão a Penetração", 90
-    elif opcao == '3': maquina, valor_hora = "Erosão a Penetração", 120
+# Criando as duas abas no topo da página do Streamlit
+aba_insercao, aba_analise = st.tabs(["📝 Inserir Pedido", "📊 Relatório de Análise"])
 
-    faturamento = horas * valor_hora
+# =====================================================================
+# ABA 1: INSERÇÃO DE DADOS
+# =====================================================================
+with aba_insercao:
+    st.header("Inserir Novo Pedido")
+    
+    # Criando o formulário visual
+    with st.form("form_pedido", clear_on_submit=True):
+        cliente = st.text_input("Nome do Cliente")
+        data_pedido = st.date_input("Data do Trabalho", value=datetime.today())
+        
+        # Horários
+        col_horario1, col_horario2 = st.columns(2)
+        with col_horario1:
+            hora_inicio = st.time_input("Horário de Início", value=datetime.strptime("08:00", "%H:%M").time())
+        with col_horario2:
+            hora_fim = st.time_input("Horário de Término", value=datetime.strptime("12:00", "%H:%M").time())
+            
+        horas = st.number_input("Quantas horas levou?", min_value=0.1, max_value=24.0, value=4.0, step=0.5)
+        
+        # Seleção da Máquina
+        maquina_opcao = st.selectbox(
+            "Selecione a Máquina",
+            [
+                "Erosão a Fio (R$ 120/h)",
+                "Erosão a Penetração (R$ 90/h)",
+                "Erosão a Penetração (R$ 120/h)"
+            ]
+        )
+        
+        # Botão para enviar
+        submetido = st.form_submit_button("Salvar Pedido no Banco de Dados")
+        
+        if submetido:
+            if not cliente:
+                st.warning("Por favor, digite o nome do cliente.")
+            else:
+                # Trata a escolha da máquina e o valor da hora
+                if "Fio" in maquina_opcao:
+                    maquina = "Erosão a Fio"
+                    valor_hora = 120
+                elif "90" in maquina_opcao:
+                    maquina = "Erosão a Penetração"
+                    valor_hora = 90
+                else:
+                    maquina = "Erosão a Penetração"
+                    valor_hora = 120
+                    
+                faturamento_total = horas * valor_hora
+                horario_string = f"{hora_inicio.strftime('%H:%M')} as {hora_fim.strftime('%H:%M')}"
+                
+                # Inserindo no banco
+                conn = obter_conexao()
+                if conn:
+                    cursor = conn.cursor()
+                    comando_sql = """
+                    INSERT INTO pedidos (cliente, data_pedido, horario, horas, maquina, valor_hora, faturamento_total)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """
+                    valores = (cliente, data_pedido.strftime('%Y-%m-%d'), horario_string, horas, maquina, valor_hora, faturamento_total)
+                    
+                    cursor.execute(comando_sql, valores)
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    
+                    st.success(f"✅ Pedido do cliente '{cliente}' salvo com sucesso!")
 
-    # Conecta e insere
+# =====================================================================
+# ABA 2: ANÁLISE DOS DADOS (RELATÓRIO)
+# =====================================================================
+with aba_analise:
+    st.header("Análise de Faturamento e Ocupação")
+    
+    # Botão para atualizar os dados manualmente se necessário
+    if st.button("Atualizar Relatório 🔄"):
+        st.rerun()
+        
     conn = obter_conexao()
     if conn:
-        cursor = conn.cursor()
-        # Comando SQL (ajuste os nomes das colunas conforme sua tabela no banco)
-        comando_sql = """
-        INSERT INTO pedidos (cliente, data_pedido, horario, horas, maquina, valor_hora, faturamento_total)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        valores = (cliente, data_str, horario, horas, maquina, valor_hora, faturamento)
-        
-        cursor.execute(comando_sql, valores)
-        conn.commit() # Salva as alterações no banco
-        print("✅ Dados salvos com sucesso na HostGator!")
-        
-        cursor.close()
+        query = "SELECT * FROM pedidos"
+        df = pd.read_sql(query, con=conn)
         conn.close()
-
-# -------------------------------------------------------------
-# PARTE 2: TRAZER DADOS DO BANCO E GERAR ANÁLISE
-# -------------------------------------------------------------
-def carregar_dados_e_analisar():
-    conn = obter_conexao()
-    if not conn:
-        return
-    
-    # O Pandas lê a query SQL e já cria o DataFrame estruturado automaticamente
-    query = "SELECT * FROM pedidos"
-    df = pd.read_sql(query, con=conn)
-    conn.close()
-
-    if df.empty:
-        print("O banco de dados está vazio.")
-        return
-
-    # Garante que a coluna de data está no formato correto para análise temporal
-    df['data_pedido'] = pd.to_datetime(df['data_pedido'])
-
-    print("\n==================================================")
-    print("📌 RELATÓRIO ATUALIZADO VIA HOSTGATOR")
-    print("==================================================")
-    
-    # Faturamento Semanal e Mensal
-    faturamento_semanal = df.resample('W', on='data_pedido')['faturamento_total'].sum()
-    faturamento_mensal = df.resample('M', on='data_pedido')['faturamento_total'].sum()
-    
-    print("\n💰 [FATURAMENTO SEMANAL]")
-    for data, valor in faturamento_semanal.items():
-        print(f"Semana terminando em {data.strftime('%d/%m/%Y')}: R$ {valor:,.2f}")
         
-    print("\n📅 [FATURAMENTO MENSAL]")
-    for data, valor in faturamento_mensal.items():
-        print(f"Mês {data.strftime('%B/%Y')}: R$ {valor:,.2f}")
-
-    # Análise de Clientes
-    print("\n👥 [ANÁLISE DE CLIENTES]")
-    pedidos_por_cliente = df['cliente'].value_counts()
-    print(f"• Total de pedidos por cliente:\n{pedidos_por_cliente.to_string()}")
-    print(f"• MAIS pedidos: {pedidos_por_cliente.idxmax()} ({pedidos_por_cliente.max()} pedidos)")
-    print(f"• MENOS pedidos: {pedidos_por_cliente.idxmin()} ({pedidos_por_cliente.min()} pedidos)")
-
-    # Ocupação de Máquinas
-    print("\n⚙️ [TEMPO DE OCUPAÇÃO DAS MÁQUINAS]")
-    horas_por_maquina = df.groupby('maquina')['horas'].sum()
-    CAPACIDADE_MENSAL_ESTIMADA = 160.0 
-    
-    for maquina, horas_ocupadas in horas_por_maquina.items():
-        horas_livres = max(0.0, CAPACIDADE_MENSAL_ESTIMADA - horas_ocupadas)
-        print(f"• {maquina}:\n  - Ocupado: {horas_ocupadas}h\n  - Livre Estimado (Mês): {horas_livres}h")
-    print("==================================================")
-
-# --- MENU DE EXECUÇÃO ---
-if __name__ == "__main__":
-    # Exemplo de fluxo: você escolhe se quer inserir ou ver o relatório
-    print("1 - Inserir Novo Pedido no Banco")
-    print("2 - Gerar Relatório de Análise")
-    opcao_menu = input("Escolha: ")
-    
-    if opcao_menu == '1':
-        salvar_pedido_no_banco()
-    elif opcao_menu == '2':
-        carregar_dados_e_analisar()
+        if df.empty:
+            st.info("Nenhum dado encontrado no banco de dados.")
+        else:
+            # Tratamento da data
+            df['data_pedido'] = pd.to_datetime(df['data_pedido'])
+            
+            # --- Bloco de Faturamento ---
+            st.subheader("💰 Faturamento")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Faturamento Semanal**")
+                faturamento_semanal = df.resample('W', on='data_pedido')['faturamento_total'].sum()
+                # Mostra como tabela formatada
+                df_semanal = faturamento_semanal.reset_index()
+                df_semanal.columns = ['Fim da Semana', 'Faturamento (R$)']
+                df_semanal['Fim da Semana'] = df_semanal['Fim da Semana'].dt.strftime('%d/%m/%Y')
+                st.dataframe(df_semanal.style.format({'Faturamento (R$)': 'R$ {:.2f}'}))
+                
+            with col2:
+                st.markdown("**Faturamento Mensal**")
+                faturamento_mensal = df.resample('M', on='data_pedido')['faturamento_total'].sum()
+                df_mensal = faturamento_mensal.reset_index()
+                df_mensal.columns = ['Mês/Ano', 'Faturamento (R$)']
+                df_mensal['Mês/Ano'] = df_mensal['Mês/Ano'].dt.strftime('%m/%Y')
+                st.dataframe(df_mensal.style.format({'Faturamento (R$)': 'R$ {:.2f}'}))
+                
+            st.markdown("---")
+            
+            # --- Bloco de Clientes ---
+            st.subheader("👥 Análise de Clientes")
+            pedidos_por_cliente = df['cliente'].value_counts()
+            
+            col_cli1, col_cli2 = st.columns([1, 2])
+            with col_cli1:
+                st.metric("Cliente com MAIS pedidos", f"{pedidos_por_cliente.idxmax()}", f"{pedidos_por_cliente.max()} pedidos")
+                st.metric("Cliente com MENOS pedidos", f"{pedidos_por_cliente.idxmin()}", f"{pedidos_por_cliente.min()} pedidos")
+            
+            with col_cli2:
+                st.markdown("**Total de pedidos por cliente:**")
+                df_clientes = pedidos_por_cliente.reset_index()
+                df_clientes.columns = ['Cliente', 'Quantidade de Pedidos']
+                st.dataframe(df_clientes, use_container_width=True)
+                
+            st.markdown("---")
+            
+            # --- Bloco de Máquinas ---
+            st.subheader("⚙️ Tempo de Ocupação das Máquinas")
+            horas_por_maquina = df.groupby('maquina')['horas'].sum()
+            
+            # Capacidade mensal estimada (ex: 160h)
+            CAPACIDADE_MENSAL = 160.0
+            
+            col_maq = st.columns(len(horas_por_maquina))
+            for i, (maquina, horas_ocupadas) in enumerate(horas_por_maquina.items()):
+                with col_maq[i]:
+                    horas_livres = max(0.0, CAPACIDADE_MENSAL - horas_ocupadas)
+                    st.info(f"**{maquina}**")
+                    st.metric("Horas Ocupadas", f"{horas_ocupadas:.1f}h")
+                    st.metric("Horas Livres Estimadas (Mês)", f"{horas_livres:.1f}h")
