@@ -108,7 +108,8 @@ st.markdown("---")
 if st.session_state['aba_selecionada'] == "📅 Agenda Diária":
     st.header("📅 Agenda de Ocupação Operacional")
     
-    data_agenda = st.date_input("Filtrar Dia da Agenda", value=st.session_state['agenda_data_selecionada'])
+    # ADICIONADO: format="DD/MM/YYYY" para converter a exibição para PT-BR
+    data_agenda = st.date_input("Filtrar Dia da Agenda", value=st.session_state['agenda_data_selecionada'], format="DD/MM/YYYY")
     st.session_state['agenda_data_selecionada'] = data_agenda
 
     conn = obtener_conexao()
@@ -194,7 +195,8 @@ elif st.session_state['aba_selecionada'] == "📝 Inserir Pedido":
     
     with st.form("form_pedido", clear_on_submit=True):
         cliente = st.text_input("Nome do Cliente")
-        data_pedido = st.date_input("Data do Trabalho", value=st.session_state['planner_data'])
+        # ADICIONADO: format="DD/MM/YYYY" para converter a exibição para PT-BR também na inserção
+        data_pedido = st.date_input("Data do Trabalho", value=st.session_state['planner_data'], format="DD/MM/YYYY")
         
         col_horario1, col_horario2 = st.columns(2)
         with col_horario1:
@@ -250,7 +252,7 @@ elif st.session_state['aba_selecionada'] == "📝 Inserir Pedido":
                     st.rerun()
 
 # =====================================================================
-# TELA: 📊 RELATÓRIO DE ANÁLISE (COMPLETO RESTAURADO)
+# TELA: 📊 RELATÓRIO DE ANÁLISE
 # =====================================================================
 elif st.session_state['aba_selecionada'] == "📊 Relatório de Análise":
     st.header("Análise de Faturamento e Ocupação")
@@ -319,7 +321,6 @@ elif st.session_state['aba_selecionada'] == "📊 Relatório de Análise":
             col_maq = st.columns(len(horas_por_maquina))
             for i, (maquina, horas_ocupadas) in enumerate(horas_por_maquina.items()):
                 with col_maq[i]:
-                    # Tempo livre é a capacidade real total calculada menos o que já foi trabalhado
                     horas_livres = max(0.0, CAPACIDADE_REAL_PERIODO - horas_ocupadas)
                     st.info(f"**{maquina}**")
                     st.metric("Horas Ocupadas", f"{horas_ocupadas:.1f}h")
